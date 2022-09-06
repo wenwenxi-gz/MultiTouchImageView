@@ -146,7 +146,7 @@ object ImageMatrixUtil {
         imageMatrix = matrix
     }
 
-    fun ImageView.fixBoundaryAfterScroll() : Boolean {
+    fun ImageView.fixBoundaryAfterScroll(): Boolean {
         if (drawable == null) return false
 
         val matrix = Matrix(imageMatrix)
@@ -353,7 +353,7 @@ object ImageMatrixUtil {
         }
     }
 
-    fun ImageView.doubleClick(middle: Float2) {
+    fun ImageView.doubleClick(clickPos: Float2) {
         if (drawable == null) {
             return
         }
@@ -370,6 +370,7 @@ object ImageMatrixUtil {
         val position = imageMatrix.getTranslate()
 
         val matrix = Matrix(imageMatrix)
+        val scalePos = clickPos.copy()
 
         if (scale.x >= maxPercentage) {
 
@@ -422,13 +423,12 @@ object ImageMatrixUtil {
         } else if (scale.x >= minPercentage) {
 
             val times = maxPercentage / scale.x
-
             ValueAnimator.ofFloat(1f, times).apply {
                 duration = 300
 
                 addUpdateListener {
                     val tempMatrix = Matrix(matrix)
-                    tempMatrix.postScale(animatedValue as Float, animatedValue as Float, middle.x, middle.y)
+                    tempMatrix.postScale(animatedValue as Float, animatedValue as Float, scalePos.x, scalePos.y)
                     imageMatrix = tempMatrix
                     centerHorizontal()
                     centerVertical()

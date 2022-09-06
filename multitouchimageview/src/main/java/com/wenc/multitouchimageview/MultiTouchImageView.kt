@@ -62,12 +62,6 @@ class MultiTouchImageView : AppCompatImageView, DefaultLifecycleObserver {
     private var isScrolling = false
 
     /**
-     * 该变量代表点击的完成，用户触发TouchEvent时，
-     * Event.Action值为Down的时候会设为false，Up的时候会设为ture，代表完成点击。
-     */
-    private var isClickFinished = false
-
-    /**
      * 该变量代表滑动的完成，用户触发TouchEvent时，
      * Event.Action值为Down的时候会设为false，
      * 当进行触发了滑动，会设为true，说明用户进行了滑动事件。
@@ -122,15 +116,12 @@ class MultiTouchImageView : AppCompatImageView, DefaultLifecycleObserver {
     var onScrollEventListener: OnScrollEventListener? = null
 
     private val actionDownRunnable = Runnable {
-
         // 判断是否消费点击事件
-        if (clickCount != 0 && isClickFinished) {
+        if (clickCount != 0) {
             // 单击
             if (clickCount == 1) {
-                if (!isScrolling) {
-                    onClickListener?.oneClick()
-                    resume()
-                }
+                onClickListener?.oneClick()
+                resume()
             }
             // 双击
             if (clickCount == 2) {
@@ -138,10 +129,9 @@ class MultiTouchImageView : AppCompatImageView, DefaultLifecycleObserver {
                 onClickListener?.doubleClick()
                 doubleClick(prePos)
             }
+            // 消费完成
+            clickCount = 0
         }
-        // 消费完成
-        clickCount = 0
-        isClickFinished = false
     }
 
     @SuppressLint("ClickableViewAccessibility")
@@ -150,13 +140,11 @@ class MultiTouchImageView : AppCompatImageView, DefaultLifecycleObserver {
         when (event.action and MotionEvent.ACTION_MASK) {
 
             MotionEvent.ACTION_DOWN -> {
-                // 通知viewPager2禁用滑动功能
+                // 禁止父View拦截
                 parent.requestDisallowInterceptTouchEvent(true)
-                // 点击未完成
-                isClickFinished = false
-                // 点击次数
-                clickCount++
-                // 正在滑动
+                // 点击次数增加
+                if (clickCount < 2) clickCount++
+                // 单指滑动开始
                 isScrolling = true
                 onScrollEventListener?.onScrollStatusChange(event, isScrolling)
                 // 滑动未完成
@@ -164,37 +152,18 @@ class MultiTouchImageView : AppCompatImageView, DefaultLifecycleObserver {
                 // 记录上一点位置
                 prePos.x = event.x
                 prePos.y = event.y
-                // 防止重复启动线程
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    if (clickHandler.hasCallbacks(actionDownRunnable)) {
-                        return true
-                    }
-                }
-                // 线程执行
-                clickHandler.postDelayed(actionDownRunnable, 320)
             }
 
             MotionEvent.ACTION_MOVE -> {
-                // 消费点击事件
-                clickCount = 0
-                // 判断是否正在缩放
-                if (isZooming) {
-                    val newDistance = ImageMatrixUtil.getDistance(event)
-                    onZoomEventListener?.onZooming(event, preDistance, newDistance)
-                    // 获取放大倍数
-                    val scale = newDistance / preDistance
-                    // 缩放图片
-                    zoom(scale, midPoint)
-                    // 保持垂直居中
-                    centerVertical()
-                    // 保持水平居中
-                    centerHorizontal()
-                    // 记录历史距离
-                    preDistance = newDistance
-                }
                 // 判断是否正在滑动
                 if (isScrolling) {
+                    // 当本次的点和上次的点一致时，不触发。（华为手机在点击时经常同时触发move，但位置没有改变，因此需要加此判断。）
+                    if ((event.x - prePos.x).absoluteValue < 0.03f && (event.y - prePos.y).absoluteValue < 0.03f) return false
+                    // 消费点击事件
+                    clickCount = 0
+                    // 正在滑动
                     onScrollEventListener?.onScrolling(event, prePos, Float2(event.x, event.y))
+                    // 记录位移量
                     val xOffset = event.x - prePos.x
                     val yOffset = event.y - prePos.y
                     // 判断图片宽高是否同时大于view的宽高
@@ -203,7 +172,7 @@ class MultiTouchImageView : AppCompatImageView, DefaultLifecycleObserver {
                         scroll(xOffset, yOffset)
                         // 到达边界
                         if (reachBoundary()) {
-                            // 通知viewPager2恢复滑动功能
+                            // 允许父View拦截
                             parent.requestDisallowInterceptTouchEvent(false)
                         }
                     }
@@ -213,14 +182,14 @@ class MultiTouchImageView : AppCompatImageView, DefaultLifecycleObserver {
                         scroll(xOffset, 0f)
                         // 到达边界
                         if (reachBoundary()) {
-                            // 通知viewPager2恢复滑动功能
+                            // 允许父View拦截
                             parent.requestDisallowInterceptTouchEvent(false)
                         }
                     }
                     // 判断图片高是否大于view的高（特殊处理）
                     if (imageIsHigher() && !imageIsWider()) {
                         if (xOffset.absoluteValue > 3 * yOffset.absoluteValue) {
-                            // 通知viewPager2恢复滑动功能
+                            // 允许父View拦截滑动事件（主要用于处理ViewPager2的翻页滑动）
                             parent.requestDisallowInterceptTouchEvent(false)
                         } else {
                             // 只改变y方向位置
@@ -229,14 +198,29 @@ class MultiTouchImageView : AppCompatImageView, DefaultLifecycleObserver {
                     }
                     // 如果图片宽高都和屏幕一样
                     if (!imageIsWider() && !imageIsHigher()) {
-                        // 通知viewPager2恢复滑动功能
+                        // 允许父View拦截
                         parent.requestDisallowInterceptTouchEvent(false)
                     }
+                    // 记录速度
                     velocity.x = xOffset
                     velocity.y = yOffset
-
                     // 滑动完成了
                     isScrollFinished = true
+                }
+                // 判断是否正在缩放
+                if (isZooming) {
+                    val currDistance = ImageMatrixUtil.getDistance(event)
+                    onZoomEventListener?.onZooming(event, preDistance, currDistance)
+                    // 获取放大倍数
+                    val scale = currDistance / preDistance
+                    // 缩放图片
+                    zoom(scale, midPoint)
+                    // 保持垂直居中
+                    centerVertical()
+                    // 保持水平居中
+                    centerHorizontal()
+                    // 记录历史距离
+                    preDistance = currDistance
                 }
                 // 记录位置
                 prePos.x = event.x
@@ -266,31 +250,41 @@ class MultiTouchImageView : AppCompatImageView, DefaultLifecycleObserver {
                 // 滑动结束
                 isScrolling = false
                 onScrollEventListener?.onScrollStatusChange(event, isScrolling)
-                // 完成点击
-                isClickFinished = true
-                // 通知viewPager2恢复滑动功能
+                // 允许父View拦截
                 parent.requestDisallowInterceptTouchEvent(false)
+                if (clickCount != 0) {
+                    // 防止重复启动线程
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        if (clickHandler.hasCallbacks(actionDownRunnable)) {
+                            return true
+                        }
+                    }
+                    // 线程执行
+                    clickHandler.postDelayed(actionDownRunnable, 250)
+                }
             }
 
             MotionEvent.ACTION_POINTER_DOWN -> {
                 // 记录历史距离
                 preDistance = ImageMatrixUtil.getDistance(event)
-                if (preDistance > 15f) {
-                    // 停止滑动
-                    isScrolling = false
-                    onScrollEventListener?.onScrollStatusChange(event, isScrolling)
-                    // 开始缩放
-                    isZooming = true
-                    onZoomEventListener?.onZoomStatusChange(event, isZooming)
-                    // 通知viewPager2禁用滑动功能
-                    parent.requestDisallowInterceptTouchEvent(true)
-                    // 记录中点位置
-                    midPoint = ImageMatrixUtil.getMiddlePoint(event)
-                }
+                // 误触判断
+                if (preDistance < 10.0f) return false
+                // 消费点击事件
+                clickCount = 0
+                // 停止单指滑动
+                isScrolling = false
+                onScrollEventListener?.onScrollStatusChange(event, isScrolling)
+                // 开始双指缩放
+                isZooming = true
+                onZoomEventListener?.onZoomStatusChange(event, isZooming)
+                // 允许父View拦截
+                parent.requestDisallowInterceptTouchEvent(true)
+                // 记录中点位置
+                midPoint = ImageMatrixUtil.getMiddlePoint(event)
             }
 
             MotionEvent.ACTION_POINTER_UP -> {
-                // 结束缩放
+                // 结束双指缩放
                 isZooming = false
                 onZoomEventListener?.onZoomStatusChange(event, isZooming)
                 // 缩放结束后若图片过小则自动恢复
