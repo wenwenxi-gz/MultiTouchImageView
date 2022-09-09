@@ -291,8 +291,6 @@ class MultiTouchImageView : AppCompatImageView, DefaultLifecycleObserver {
                 fixSizeAfterZoom()
                 // 缩放结束后若图片离开边界，则回到边界
                 fixBoundaryAfterZoom()
-                // 通知viewPager2恢复滑动功能
-                parent.requestDisallowInterceptTouchEvent(false)
             }
         }
 
