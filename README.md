@@ -32,6 +32,24 @@ dependencies {
 </dependency>
 ```
 
+## 效果展示
+
+### 双指缩放
+
+两只手指放上屏幕即可进行缩放效果。
+
+![zoom](readme_res\zoom.gif)
+
+### 单指滚动
+
+图片放大以后，可以进行滚动查看，快速滚动松开手指，会自动滑动一段距离。
+
+![scroll_and_slide](readme_res\scroll_and_slide.gif)
+
+### 单击和双击
+
+单击会让图片恢复到居中位置。快速双击会让图片进行放大或缩小。
+
 ## 简单使用？
 
 ### 第一步
@@ -64,22 +82,6 @@ imageView.setImageResource(R.mipmap.ic_launcher)
 设置图片后变可以进行缩放和滑动功能。
 
 ## 进阶使用：
-
-### 设置网络图片
-
-能够设置网络图片，并且可以先加载缩略图，再加载原图。原图未加载完成时，会使用缩略图进行占位。
-
-```kotlin
-val imageView = findViewById<MultiTouchImageView>(R.id.imageView)
-imageView.setWebImage(glideUrlThumbnail, glideUrl)
-```
-
-也可以使用本地图片作缩略图未加载完成时的占位。
-
-```kotlin
-val imageView = findViewById<MultiTouchImageView>(R.id.imageView)
-imageView.setWebImage(resourceId, glideUrlThumbnail, glideUrl)
-```
 
 ### 进入沉浸式
 
