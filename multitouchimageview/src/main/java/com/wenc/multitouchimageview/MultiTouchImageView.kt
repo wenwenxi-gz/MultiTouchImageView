@@ -14,27 +14,14 @@ import androidx.appcompat.widget.AppCompatImageView
 import androidx.core.view.doOnLayout
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
-import com.bumptech.glide.Glide
-import com.bumptech.glide.load.model.GlideUrl
-import com.bumptech.glide.load.model.LazyHeaders
-import com.bumptech.glide.request.target.CustomTarget
-import com.bumptech.glide.request.target.ImageViewTarget
-import com.bumptech.glide.request.transition.Transition
-import com.wenc.multitouchimageview.ImageMatrixUtil.centerHorizontal
-import com.wenc.multitouchimageview.ImageMatrixUtil.centerVertical
 import com.wenc.multitouchimageview.ImageMatrixUtil.doubleClick
 import com.wenc.multitouchimageview.ImageMatrixUtil.fitCenter
 import com.wenc.multitouchimageview.ImageMatrixUtil.fixBoundaryAfterScroll
-import com.wenc.multitouchimageview.ImageMatrixUtil.fixBoundaryAfterZoom
 import com.wenc.multitouchimageview.ImageMatrixUtil.fixSizeAfterZoom
-import com.wenc.multitouchimageview.ImageMatrixUtil.imageIsHigher
-import com.wenc.multitouchimageview.ImageMatrixUtil.imageIsWider
-import com.wenc.multitouchimageview.ImageMatrixUtil.reachBoundary
 import com.wenc.multitouchimageview.ImageMatrixUtil.resume
 import com.wenc.multitouchimageview.ImageMatrixUtil.scroll
 import com.wenc.multitouchimageview.ImageMatrixUtil.slide
 import com.wenc.multitouchimageview.ImageMatrixUtil.zoom
-
 import kotlin.math.absoluteValue
 
 /**
@@ -157,48 +144,17 @@ class MultiTouchImageView : AppCompatImageView, DefaultLifecycleObserver {
             MotionEvent.ACTION_MOVE -> {
                 // 判断是否正在滑动
                 if (isScrolling) {
+                    // 记录位移量
+                    val xOffset = event.x - prePos.x
+                    val yOffset = event.y - prePos.y
                     // 当本次的点和上次的点一致时，不触发。（华为手机在点击时经常同时触发move，但位置没有改变，因此需要加此判断。）
-                    if ((event.x - prePos.x).absoluteValue < 0.03f && (event.y - prePos.y).absoluteValue < 0.03f) return false
+                    if (xOffset.absoluteValue < 0.03f && yOffset.absoluteValue < 0.03f) return false
                     // 消费点击事件
                     clickCount = 0
                     // 正在滑动
                     onScrollEventListener?.onScrolling(event, prePos, Float2(event.x, event.y))
-                    // 记录位移量
-                    val xOffset = event.x - prePos.x
-                    val yOffset = event.y - prePos.y
-                    // 判断图片宽高是否同时大于view的宽高
-                    if (imageIsWider() && imageIsHigher()) {
-                        // 改变位置
-                        scroll(xOffset, yOffset)
-                        // 到达边界
-                        if (reachBoundary()) {
-                            // 允许父View拦截
-                            parent.requestDisallowInterceptTouchEvent(false)
-                        }
-                    }
-                    // 判断图片宽是否大于view的宽
-                    if (imageIsWider() && !imageIsHigher()) {
-                        // 只改变x方向位置
-                        scroll(xOffset, 0f)
-                        // 到达边界
-                        if (reachBoundary()) {
-                            // 允许父View拦截
-                            parent.requestDisallowInterceptTouchEvent(false)
-                        }
-                    }
-                    // 判断图片高是否大于view的高（特殊处理）
-                    if (imageIsHigher() && !imageIsWider()) {
-                        if (xOffset.absoluteValue > 3 * yOffset.absoluteValue) {
-                            // 允许父View拦截滑动事件（主要用于处理ViewPager2的翻页滑动）
-                            parent.requestDisallowInterceptTouchEvent(false)
-                        } else {
-                            // 只改变y方向位置
-                            scroll(0f, yOffset)
-                        }
-                    }
-                    // 如果图片宽高都和屏幕一样
-                    if (!imageIsWider() && !imageIsHigher()) {
-                        // 允许父View拦截
+                    // 无法滚动则允许父View拦截事件
+                    if (!scroll(xOffset, yOffset)) {
                         parent.requestDisallowInterceptTouchEvent(false)
                     }
                     // 记录速度
@@ -215,10 +171,6 @@ class MultiTouchImageView : AppCompatImageView, DefaultLifecycleObserver {
                     val scale = currDistance / preDistance
                     // 缩放图片
                     zoom(scale, midPoint)
-                    // 保持垂直居中
-                    centerVertical()
-                    // 保持水平居中
-                    centerHorizontal()
                     // 记录历史距离
                     preDistance = currDistance
                 }
@@ -232,18 +184,8 @@ class MultiTouchImageView : AppCompatImageView, DefaultLifecycleObserver {
                 if (isScrollFinished) {
                     // 拖动结束后若图片离开边界，则回到边界
                     if (!fixBoundaryAfterScroll()) {
-                        // 判断图片宽高是否同时大于view的宽高
-                        if (imageIsWider() && imageIsHigher()) {
-                            slide(velocity)
-                        }
-                        // 判断图片宽是否大于view的宽
-                        if (imageIsWider() && !imageIsHigher()) {
-                            slide(Float2(x = velocity.x))
-                        }
-                        // 判断图片高是否大于view的高（特殊处理）
-                        if (imageIsHigher() && !imageIsWider()) {
-                            slide(Float2(y = velocity.y))
-                        }
+                        // 没有离开边界则根据速度滑动
+                        slide(velocity)
                     }
                     isScrollFinished = false
                 }
@@ -289,82 +231,9 @@ class MultiTouchImageView : AppCompatImageView, DefaultLifecycleObserver {
                 onZoomEventListener?.onZoomStatusChange(event, isZooming)
                 // 缩放结束后若图片过小则自动恢复
                 fixSizeAfterZoom()
-                // 缩放结束后若图片离开边界，则回到边界
-                fixBoundaryAfterZoom()
             }
         }
-
         return true
-    }
-
-    fun setWebImage(thumbnailUrl: String, originalImageUrl: String) {
-        val thumbnailGlideUrl = GlideUrl(thumbnailUrl, LazyHeaders.Builder().build())
-        val originalImageGlideUrl = GlideUrl(originalImageUrl, LazyHeaders.Builder().build())
-        setWebImage(thumbnailGlideUrl, originalImageGlideUrl)
-    }
-
-    fun setWebImage(thumbnailUrl: GlideUrl, originalImageUrl: GlideUrl) {
-        setWebImage(null, thumbnailUrl, originalImageUrl)
-    }
-
-    /**
-     * @param placeholder 本地的resource ID，作占位图。
-     * @param thumbnailUrl 远端的缩略图地址。
-     * @param originalImageUrl 远端的原图地址。
-     *
-     * 先使用本地资源作占位图，随即加载缩略图，缩略图拿到后再开始拿原图，同时缩略图用作占位图。
-     */
-    fun setWebImage(placeholder: Int, thumbnailUrl: GlideUrl, originalImageUrl: GlideUrl) {
-        Glide.with(this).asDrawable().load(thumbnailUrl).placeholder(placeholder)
-            .into(object : CustomTarget<Drawable>() {
-
-                override fun onResourceReady(resource: Drawable, transition: Transition<in Drawable>?) {
-
-                    Glide.with(context).load(originalImageUrl).placeholder(resource)
-                        .into(object : ImageViewTarget<Drawable>(this@MultiTouchImageView) {
-
-                            override fun onResourceReady(resource: Drawable, transition: Transition<in Drawable>?) {
-                                super.onResourceReady(resource, transition)
-
-                                setImageDrawable(resource)
-                            }
-
-                            override fun setResource(resource: Drawable?) {}
-                        })
-                }
-
-                override fun onLoadCleared(placeholder: Drawable?) {}
-            })
-    }
-
-    /**
-     * @param placeholder 本地的drawable，作占位图。
-     * @param thumbnailUrl 远端的缩略图地址。
-     * @param originalImageUrl 远端的原图地址。
-     *
-     * 先使用本地drawable作占位图，随即加载缩略图，缩略图拿到后再开始拿原图，同时缩略图用作占位图。
-     */
-    fun setWebImage(placeholder: Drawable?, thumbnailUrl: GlideUrl, originalImageUrl: GlideUrl) {
-        Glide.with(this).asDrawable().load(thumbnailUrl).placeholder(placeholder)
-            .into(object : CustomTarget<Drawable>() {
-
-                override fun onResourceReady(resource: Drawable, transition: Transition<in Drawable>?) {
-
-                    Glide.with(context).load(originalImageUrl).placeholder(resource)
-                        .into(object : ImageViewTarget<Drawable>(this@MultiTouchImageView) {
-
-                            override fun onResourceReady(resource: Drawable, transition: Transition<in Drawable>?) {
-                                super.onResourceReady(resource, transition)
-
-                                setImageDrawable(resource)
-                            }
-
-                            override fun setResource(resource: Drawable?) {}
-                        })
-                }
-
-                override fun onLoadCleared(placeholder: Drawable?) {}
-            })
     }
 
     interface OnClickListener {
