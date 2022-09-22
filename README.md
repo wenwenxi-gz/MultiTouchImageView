@@ -45,13 +45,13 @@ dependencies {
 
 两只手指放上屏幕即可进行缩放效果。
 
-![zoom](readmeRes\zoom.gif)
+![zoom](readmeRes/zoom.gif)
 
 ### 单指滚动
 
 图片放大以后，可以进行滚动查看，快速滚动松开手指，会自动滑动一段距离。
 
-![scrollandslide](readmeRes\scrollandslide.gif)
+![scrollandslide](readmeRes/scrollandslide.gif)
 
 ### 单击和双击
 
