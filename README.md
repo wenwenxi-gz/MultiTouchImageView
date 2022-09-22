@@ -1,6 +1,13 @@
 # MultiTouchImageView
-能够缩放和滑动图片。
-能够加载网络图片。
+## 功能介绍
+
+- 主要功能：能够进行缩放和滑动图片。
+
+- 特点：
+  - 适配viewPager2（横向翻页），滑动时判断边界，在合适的时机才会触发viewPager2的翻页。
+  - 提供单击和双击事件接口，单击会恢复图片大小，双击放大或缩小图片。
+  - 图片恢复大小时的过渡动画，双击放大缩小图片的过渡动画。
+
 ## 下载
 
 使用gradle。
@@ -38,13 +45,13 @@ dependencies {
 
 两只手指放上屏幕即可进行缩放效果。
 
-![zoom](readme_res\zoom.gif)
+![zoom](readmeRes\zoom.gif)
 
 ### 单指滚动
 
 图片放大以后，可以进行滚动查看，快速滚动松开手指，会自动滑动一段距离。
 
-![scroll_and_slide](readme_res\scroll_and_slide.gif)
+![scrollandslide](readmeRes\scrollandslide.gif)
 
 ### 单击和双击
 
