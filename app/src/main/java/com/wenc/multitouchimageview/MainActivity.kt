@@ -20,6 +20,10 @@ class MainActivity : AppCompatActivity() {
         imageView.apply {
             setImageResource(R.mipmap.ic_launcher)
 
+            zoomMaxTimes = 4
+            zoomDampingFactor = 2
+            scrollDampingFactor = 3
+
             onClickListener = object : MultiTouchImageView.OnClickListener {
                 override fun oneClick() {
                     // 切换沉浸模式

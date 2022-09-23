@@ -8,21 +8,15 @@ import android.view.animation.AccelerateInterpolator
 import android.view.animation.DecelerateInterpolator
 import android.widget.ImageView
 import kotlin.math.absoluteValue
+import kotlin.math.pow
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
 
-object ImageMatrixUtil {
+object ImageProcessor {
 
-    fun ImageView.fitCenter() {
+    fun MultiTouchImageView.fitCenter() {
         if (drawable == null) return
-
-        val dWidth = drawable.intrinsicWidth
-        val dHeight = drawable.intrinsicHeight
-
-        val widthPercentage = width.toFloat() / dWidth.toFloat()
-        val heightPercentage = height.toFloat() / dHeight.toFloat()
-        val minPercentage = widthPercentage.coerceAtMost(heightPercentage)
 
         val targetWidth = (minPercentage * dWidth).roundToInt()
         val targetHeight = (minPercentage * dHeight).roundToInt()
@@ -35,15 +29,8 @@ object ImageMatrixUtil {
         imageMatrix = matrix
     }
 
-    fun ImageView.centerCrop() {
+    fun MultiTouchImageView.centerCrop() {
         if (drawable == null) return
-
-        val dWidth = drawable.intrinsicWidth
-        val dHeight = drawable.intrinsicHeight
-
-        val widthPercentage = width.toFloat() / dWidth.toFloat()
-        val heightPercentage = height.toFloat() / dHeight.toFloat()
-        val maxPercentage = widthPercentage.coerceAtLeast(heightPercentage)
 
         val targetWidth = (maxPercentage * dWidth).roundToInt()
         val targetHeight = (maxPercentage * dHeight).roundToInt()
@@ -57,8 +44,8 @@ object ImageMatrixUtil {
     }
 
     /**
-     * @param xOffset x轴方向的偏移量
-     * @param yOffset y轴方向的偏移量
+     * @param offset [Float2]偏移量，包含x轴和y轴
+     *
      * 该方法用于滚动图片，根据image和view的大小，进行不同的滚动。
      * 当image的宽小于view的宽，只进行y轴的滚动。
      * 当image的高小于view的高，只进行x轴的滚动。
@@ -68,23 +55,29 @@ object ImageMatrixUtil {
      *
      * @return [Boolean] 值为false时滚动失败。[Boolean] 值为true时滚动成功。
      */
-    fun ImageView.scroll(xOffset: Float, yOffset: Float): Boolean {
+    fun MultiTouchImageView.scroll(offset: Float2, dampingFactor: Int): Boolean {
         if (drawable == null) return false
         // 图片左上角顶点的坐标
         val position = imageMatrix.getTranslate()
         // 图片的缩放程度
         val scale = imageMatrix.getScale()
-        // 原图宽高
-        val dWidth = drawable.intrinsicWidth
-        val dHeight = drawable.intrinsicHeight
-        // 视图宽高
-        val vWidth = width
-        val vHeight = height
         // 图片宽高
         val iWidth = dWidth * scale.x
         val iHeight = dHeight * scale.y
-
+        // 当前矩阵
         val matrix = Matrix(imageMatrix)
+
+        // 获取偏移值
+        val overflow = getPositionOverflow(matrix)
+        // 设置阻尼
+        var xDamping = 1 - overflow.x.absoluteValue / vWidth
+        var yDamping = 1 - overflow.y.absoluteValue / vHeight
+        xDamping = xDamping.pow(dampingFactor)
+        yDamping = yDamping.pow(dampingFactor)
+        // 位移量
+        val xOffset = offset.x * xDamping
+        val yOffset = offset.y * yDamping
+
         // 如果左右两边离开边界太多，禁止滚动
         if (position.x > 20f || position.x + dWidth * scale.x < vWidth - 20f) return false
         // 如果图片宽高都和屏幕一样，禁止滚动
@@ -104,28 +97,27 @@ object ImageMatrixUtil {
     }
 
     /**
-     * @param scale 缩放的倍数
+     * @param times 缩放的倍数
      * @param middle 缩放时围绕的点
      *
-     *  先围绕[middle]点进行[scale]倍数的矩阵变化
+     *  先围绕[middle]点进行[times]倍数的矩阵变化
      *  拿到变化后的矩阵，判断位置是否需要进行调整
      *  需要调整的情况：
      *  1、放大时，如果图片宽高小于视图宽高时，要保持图片水平居中或者垂直居中。
      *  2、缩小时，如果图片宽高大于视图宽高，要保持图片左右边界不进入视图的左右边界，或图片上下边界不进入视图的上下边界。
      */
-    fun ImageView.zoom(scale: Float, middle: Float2) {
+    fun MultiTouchImageView.zoom(times: Float, middle: Float2, maxTimes: Int, dampingFactor: Int) {
         if (drawable == null) return
-
-        // 原图宽高
-        val dWidth = drawable.intrinsicWidth
-        val dHeight = drawable.intrinsicHeight
-        // 视图宽高
-        val vWidth = width.toFloat()
-        val vHeight = height.toFloat()
+        // 计算阻尼
+        val originScale = imageMatrix.getScale()
+        var damping = if (originScale.x >= maxPercentage * maxTimes) {
+            1 - ((originScale.x - (maxPercentage * maxTimes)) / (maxPercentage * maxTimes))
+        } else 1f
+        damping = damping.pow(dampingFactor)
 
         // 取出imageView的矩阵进行缩放
         val matrix = Matrix(imageMatrix).also {
-            it.postScale(scale, scale, middle.x, middle.y)
+            it.postScale(1 + (times - 1) * damping, 1 + (times - 1) * damping, middle.x, middle.y)
             val position = it.getTranslate()
             val mScale = it.getScale()
 
@@ -141,7 +133,6 @@ object ImageMatrixUtil {
             // 调整位置
             it.postTranslate(xOffset, yOffset)
         }
-
         // 给imageView矩阵赋值
         imageMatrix = matrix
     }
@@ -149,26 +140,15 @@ object ImageMatrixUtil {
     /**
      * 缩放结束后触发，当image小于view时，执行动画恢复至fitCenter
      */
-    fun ImageView.fixSizeAfterZoom() {
+    fun MultiTouchImageView.fixSize(maxTimes: Int) {
         if (drawable == null) return
-
+        // 图片左上角顶点的坐标
+        val position = imageMatrix.getTranslate()
         // 图片的缩放程度
         val scale = imageMatrix.getScale()
-        // 原图宽高
-        val dWidth = drawable.intrinsicWidth
-        val dHeight = drawable.intrinsicHeight
-        // 视图宽高
-        val vWidth = width.toFloat()
-        val vHeight = height.toFloat()
-        // 图片宽高
-        val iWidth = dWidth * scale.x
-        val iHeight = dHeight * scale.y
 
         // 如果图片宽高都小于view的宽高，则恢复大小
-        if (iWidth < vWidth && iHeight < vHeight) {
-            val widthPercentage = vWidth / dWidth.toFloat()
-            val heightPercentage = vHeight / dHeight.toFloat()
-            val minPercentage = widthPercentage.coerceAtMost(heightPercentage)
+        if (scale.x < minPercentage) {
             // 临时矩阵
             val tempMatrix = Matrix()
             ValueAnimator.ofFloat(scale.x, minPercentage).apply {
@@ -185,15 +165,38 @@ object ImageMatrixUtil {
                 start()
             }
         }
+        // 如果图片宽高都大于view的宽高，且缩放比，大于maxPercentage的maxScaleTime倍，则恢复到maxPercentage * maxScaleTime的大小。
+        if (scale.x > maxPercentage * maxTimes) {
+            val matrix = Matrix(imageMatrix)
+            // 大小偏差
+            val times = (maxPercentage * maxTimes) / scale.x
+            // 缩放所围绕的点
+            val point = getScalePoint(position, scale)
+
+            ValueAnimator.ofFloat(1f, times).apply {
+                duration = 300
+                interpolator = DecelerateInterpolator()
+                addUpdateListener {
+                    // 临时矩阵
+                    val tempMatrix = Matrix(matrix)
+                    tempMatrix.postScale(animatedValue as Float, animatedValue as Float, point.x, point.y)
+                    // 获取偏离值
+                    val skew = getPositionSkew(tempMatrix)
+                    tempMatrix.postTranslate(skew.x, skew.y)
+                    imageMatrix = tempMatrix
+                }
+                start()
+            }
+        }
     }
 
     /**
      * 滚动结束后执行，当image边界离开view边界时，执行动画恢复image移动至view边界处。
      * @return [Boolean] 为true时执行了移动。为false代表不需要执行恢复，后续需要进行[slide]滑动。
      */
-    fun ImageView.fixBoundaryAfterScroll(): Boolean {
+    fun MultiTouchImageView.fixBoundary(): Boolean {
         if (drawable == null) return false
-        val matrix = Matrix(imageMatrix)
+        val originMatrix = Matrix(imageMatrix)
         // 溢出的位置
         val overflow = getPositionOverflow(imageMatrix)
         // 没有溢出则不需要执行
@@ -202,7 +205,7 @@ object ImageMatrixUtil {
         ValueAnimator.ofObject(Float2Evaluator, Float2(), overflow).apply {
             duration = 350
             addUpdateListener {
-                val tempMatrix = Matrix(matrix)
+                val tempMatrix = Matrix(originMatrix)
                 tempMatrix.postTranslate((animatedValue as Float2).x, (animatedValue as Float2).y)
                 imageMatrix = tempMatrix
             }
@@ -212,17 +215,10 @@ object ImageMatrixUtil {
         return true
     }
 
-    private fun ImageView.getPositionOverflow(matrix: Matrix): Float2 {
+    private fun MultiTouchImageView.getPositionOverflow(matrix: Matrix): Float2 {
         if (drawable == null) return Float2()
         val position = matrix.getTranslate()
         val scale = matrix.getScale()
-
-        // 原图宽高
-        val dWidth = drawable.intrinsicWidth
-        val dHeight = drawable.intrinsicHeight
-        // 视图宽高
-        val vWidth = width.toFloat()
-        val vHeight = height.toFloat()
         // 图片宽高
         val iWidth = dWidth * scale.x
         val iHeight = dHeight * scale.y
@@ -248,23 +244,16 @@ object ImageMatrixUtil {
         } else 0f
     }
 
-    private fun ImageView.getPositionSkew(matrix: Matrix): Float2 {
+    private fun MultiTouchImageView.getPositionSkew(matrix: Matrix): Float2 {
         if (drawable == null) return Float2()
         val position = matrix.getTranslate()
         val scale = matrix.getScale()
-
-        val vWidth = width.toFloat()
-        val vHeight = height.toFloat()
-
-        val imageWidth = drawable.intrinsicWidth * scale.x
-        val imageHeight = drawable.intrinsicHeight * scale.y
-
-        val xSkew = if (imageWidth <= vWidth) getSkew(position.x, imageWidth, vWidth)
-        else 0f
-
-        val ySkew = if (imageHeight <= vHeight) getSkew(position.y, imageHeight, vHeight)
-        else 0f
-
+        // 图片宽高
+        val imageWidth = dWidth * scale.x
+        val imageHeight = dHeight * scale.y
+        // 计算偏离值
+        val xSkew = if (imageWidth <= vWidth) getSkew(position.x, imageWidth, vWidth) else 0f
+        val ySkew = if (imageHeight <= vHeight) getSkew(position.y, imageHeight, vHeight) else 0f
         return Float2(xSkew, ySkew)
     }
 
@@ -289,21 +278,13 @@ object ImageMatrixUtil {
      * 2、仅当image的宽大于view的宽时，仅x轴进行滑动
      * 3、仅当image的高大于view的高时，仅y轴进行滑动
      */
-    fun ImageView.slide(velocity: Float2) {
+    fun MultiTouchImageView.slide(velocity: Float2) {
         if (drawable == null) return
-
         // 图片的缩放程度
         val scale = imageMatrix.getScale()
-        // 原图宽高
-        val dWidth = drawable.intrinsicWidth
-        val dHeight = drawable.intrinsicHeight
-        // 视图宽高
-        val vWidth = width
-        val vHeight = height
         // 图片宽高
         val iWidth = dWidth * scale.x
         val iHeight = dHeight * scale.y
-
         // 如果图片宽高都和view一样，禁止滑动
         if (iWidth <= vWidth && iHeight <= vHeight) return
         // 如果图片宽高都大于view，则x、y轴都进行滑动
@@ -319,7 +300,7 @@ object ImageMatrixUtil {
      * @param yVelocity y轴的平移初始值
      * 开始平移的动画
      */
-    private fun ImageView.slideStart(xVelocity: Float, yVelocity: Float) {
+    private fun MultiTouchImageView.slideStart(xVelocity: Float, yVelocity: Float) {
         ValueAnimator.ofObject(Float2Evaluator, Float2(xVelocity, yVelocity), Float2()).apply {
             duration = 600
             addUpdateListener {
@@ -335,7 +316,7 @@ object ImageMatrixUtil {
      * 在动画中，进行offset大小的平移转换后，为了保证image的边界不离开view的边界，
      * 通过[getPositionOverflow]获取溢出值，再进行一个转换调整。
      */
-    private fun ImageView.sliding(offset: Float2) {
+    private fun MultiTouchImageView.sliding(offset: Float2) {
         if (drawable == null) return
         val tempMatrix = Matrix(imageMatrix).also {
             it.postTranslate(offset.x, offset.y)
@@ -348,35 +329,18 @@ object ImageMatrixUtil {
     /**
      * 恢复图片到fitCenter状态
      */
-    fun ImageView.resume() {
+    fun MultiTouchImageView.resumeFitCenter() {
         if (drawable == null) return
-
         // 图片左上角顶点的坐标
         val position = imageMatrix.getTranslate()
         // 图片的缩放程度
         val scale = imageMatrix.getScale()
-        // 原图宽高
-        val dWidth = drawable.intrinsicWidth.toFloat()
-        val dHeight = drawable.intrinsicHeight.toFloat()
-        // 视图宽高
-        val vWidth = width.toFloat()
-        val vHeight = height.toFloat()
-        // 图片宽高
-        val iWidth = dWidth * scale.x
-        val iHeight = dHeight * scale.y
-
-        val widthPercentage = vWidth / dWidth
-        val heightPercentage = vHeight / dHeight
-        val minPercentage = widthPercentage.coerceAtMost(heightPercentage)
         // 获取图片当前矩阵
         val matrix = Matrix(imageMatrix)
         // 大小偏差
         val times = minPercentage / scale.x
-
-        val x = if (vWidth == iWidth) 0f else position.x / (vWidth - iWidth)
-        val y = if (vHeight == iHeight) 0f else position.y / (vHeight - iHeight)
         // 缩放所围绕的点
-        val point = Float2(width * x, height * y)
+        val point = getScalePoint(position, scale)
 
         ValueAnimator.ofFloat(1f, times).apply {
             duration = 300
@@ -386,6 +350,53 @@ object ImageMatrixUtil {
                 tempMatrix.postScale(animatedValue as Float, animatedValue as Float, point.x, point.y)
                 // 获取偏离值
                 val skew = getPositionSkew(tempMatrix)
+                // 调整位置
+                tempMatrix.postTranslate(skew.x, skew.y)
+                imageMatrix = tempMatrix
+            }
+            addListener(object : Animator.AnimatorListener {
+                override fun onAnimationStart(animation: Animator?) {}
+                override fun onAnimationEnd(animation: Animator?) {
+                    matrix.setScale(minPercentage, minPercentage)
+                    // 获取偏离值
+                    val skew = getPositionSkew(matrix)
+                    // 调整位置
+                    matrix.postTranslate(skew.x, skew.y)
+                    imageMatrix = matrix
+                }
+
+                override fun onAnimationCancel(animation: Animator?) {}
+                override fun onAnimationRepeat(animation: Animator?) {}
+            })
+            start()
+        }
+    }
+
+    /**
+     * 恢复图片到centerCrop状态
+     */
+    fun MultiTouchImageView.resumeCenterCrop() {
+        if (drawable == null) return
+        // 图片左上角顶点的坐标
+        val position = imageMatrix.getTranslate()
+        // 图片的缩放程度
+        val scale = imageMatrix.getScale()
+        // 获取图片当前矩阵
+        val matrix = Matrix(imageMatrix)
+        // 大小偏差
+        val times = maxPercentage / scale.x
+        // 缩放所围绕的点
+        val point = getScalePoint(position, scale)
+
+        ValueAnimator.ofFloat(1f, times).apply {
+            duration = 300
+            interpolator = DecelerateInterpolator()
+            addUpdateListener {
+                val tempMatrix = Matrix(matrix)
+                tempMatrix.postScale(animatedValue as Float, animatedValue as Float, point.x, point.y)
+                // 获取偏离值
+                val skew = getPositionSkew(tempMatrix)
+                // 调整位置
                 tempMatrix.postTranslate(skew.x, skew.y)
                 imageMatrix = tempMatrix
             }
@@ -412,33 +423,19 @@ object ImageMatrixUtil {
      * 图片较小时会进行放大至centerCrop状态
      * 图片较大时会进行缩小至fitCenter状态
      */
-    fun ImageView.doubleClick(clickPos: Float2) {
-        if (drawable == null) {
-            return
-        }
-        val dWidth = drawable.intrinsicWidth
-        val dHeight = drawable.intrinsicHeight
-
-        val widthPercentage = width.toFloat() / dWidth.toFloat()
-        val heightPercentage = height.toFloat() / dHeight.toFloat()
-
-        val minPercentage = widthPercentage.coerceAtMost(heightPercentage)
-        val maxPercentage = widthPercentage.coerceAtLeast(heightPercentage)
-
-        val scale = imageMatrix.getScale()
+    fun MultiTouchImageView.switchSize(clickPos: Float2) {
+        if (drawable == null) return
+        // 图片左上角顶点的坐标
         val position = imageMatrix.getTranslate()
-
+        // 图片的缩放程度
+        val scale = imageMatrix.getScale()
+        // 获取图片当前矩阵
         val matrix = Matrix(imageMatrix)
-        val scalePos = clickPos.copy()
 
         if (scale.x >= maxPercentage) {
 
             val times = minPercentage / scale.x
-
-            val x = if (width.toFloat() == dWidth * scale.x) 0f else position.x / (width - dWidth * scale.x)
-            val y = if (height.toFloat() == dHeight * scale.y) 0f else position.y / (height - dHeight * scale.y)
-
-            val point = Float2(width * x, height * y)
+            val point = getScalePoint(position, scale)
 
             ValueAnimator.ofFloat(1f, times).apply {
                 duration = 300
@@ -472,12 +469,13 @@ object ImageMatrixUtil {
         } else if (scale.x >= minPercentage) {
 
             val times = maxPercentage / scale.x
+
             ValueAnimator.ofFloat(1f, times).apply {
                 duration = 300
                 interpolator = DecelerateInterpolator()
                 addUpdateListener {
                     val tempMatrix = Matrix(matrix)
-                    tempMatrix.postScale(animatedValue as Float, animatedValue as Float, scalePos.x, scalePos.y)
+                    tempMatrix.postScale(animatedValue as Float, animatedValue as Float, clickPos.x, clickPos.y)
                     // 获取偏离值
                     val skew = getPositionSkew(tempMatrix)
                     // 调整位置
@@ -503,6 +501,18 @@ object ImageMatrixUtil {
         }
     }
 
+    /**
+     * 计算缩放所围绕的点，该点为目标矩形和当前矩形一致的点。
+     * 保证缩放动画能沿着准确的方向显示。
+     *
+     * @date 2022.09.23
+     */
+    private fun MultiTouchImageView.getScalePoint(position: Float2, scale: Float2): Float2 {
+        val x = if (width.toFloat() == dWidth * scale.x) 0f else position.x / (width - dWidth * scale.x)
+        val y = if (height.toFloat() == dHeight * scale.y) 0f else position.y / (height - dHeight * scale.y)
+        return Float2(width * x, height * y)
+    }
+
     private fun Matrix.getTranslate(): Float2 {
         val floatArray = FloatArray(9)
         this.getValues(floatArray)
@@ -513,19 +523,5 @@ object ImageMatrixUtil {
         val floatArray = FloatArray(9)
         this.getValues(floatArray)
         return Float2(floatArray[0], floatArray[4])
-    }
-
-    //获取距离
-    fun getDistance(event: MotionEvent): Float {
-        //获取两点间距离
-        val x = event.getX(0) - event.getX(1)
-        val y = event.getY(0) - event.getY(1)
-        return sqrt((x * x + y * y).toDouble()).toFloat()
-    }
-
-    fun getMiddlePoint(event: MotionEvent): Float2 {
-        val midX = (event.getX(1) + event.getX(0)) / 2
-        val midY = (event.getY(1) + event.getY(0)) / 2
-        return Float2(midX, midY)
     }
 }
