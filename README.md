@@ -7,6 +7,7 @@
   - 适配viewPager2（横向翻页），滑动时判断边界，在合适的时机才会触发viewPager2的翻页。
   - 提供单击和双击事件接口，单击会恢复图片大小，双击放大或缩小图片。
   - 图片恢复大小时的过渡动画，双击放大缩小图片的过渡动画。
+  - 图片离开边界后会产生阻尼效果，图片放大超过最大限制后会产生阻尼效果。
 
 ## 下载
 
@@ -70,12 +71,15 @@ dependencies {
     android:id="@+id/imageView"
     android:layout_width="0dp"
     android:layout_height="0dp"
+    android:scaleType="fitCenter"
     app:layout_constraintBottom_toBottomOf="parent"
     app:layout_constraintEnd_toEndOf="parent"
     app:layout_constraintStart_toStartOf="parent"
     app:layout_constraintTop_toTopOf="parent"
     tools:srcCompat="@tools:sample/avatars" />
 ```
+
+**注意：**必须设置一个初始的scaleType，如android:scaleType="fitCenter"，目前仅支持fitCenter和centerCrop，若不设置，默认是fitCenter但无法进行缩放等效果。
 
 ### 第二步
 
@@ -87,6 +91,19 @@ imageView.setImageResource(R.mipmap.ic_launcher)
 ```
 
 设置图片后变可以进行缩放和滑动功能。
+
+### 第三步
+
+设置部分参数。
+
+```
+zoomMaxTimes = 4
+zoomDampingFactor = 2
+scrollDampingFactor = 3
+clickEventDelay = 250L
+```
+
+目前提供缩放最大限制，缩放阻尼因子，滑动阻尼因子，还有双击事件的响应时间。
 
 ## 进阶使用：
 
